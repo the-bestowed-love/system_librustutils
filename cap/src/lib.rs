@@ -387,8 +387,26 @@ impl CapabilitiesSet {
         //         valid as they refer to regions allocated on the local stack
         //         frame. The return value is checked and wrapped in a
         //         `LibcResult`.
-        let result =
+        let mut result =
             unsafe { cap_bindgen::capset(std::ptr::addr_of_mut!(header), data.as_mut_ptr()) };
+
+        if result != 0 && nix::errno::Errno::last() == Errno::EINVAL {
+            let max_bits = cap_max_bits() as u32;
+            if max_bits < 64 {
+                let mask0 = if max_bits < 32 { (1u32 << (max_bits + 1)).wrapping_sub(1) } else { !0u32 };
+                let mask1 = if max_bits >= 32 { (1u32 << (max_bits - 32 + 1)).wrapping_sub(1) } else { 0u32 };
+                data[0].effective &= mask0;
+                data[0].permitted &= mask0;
+                data[0].inheritable &= mask0;
+                data[1].effective &= mask1;
+                data[1].permitted &= mask1;
+                data[1].inheritable &= mask1;
+                // SAFETY: The pointers passed to this function are guaranteed to be
+                //         valid as they refer to regions allocated on the local stack
+                //         frame.
+                result = unsafe { cap_bindgen::capset(std::ptr::addr_of_mut!(header), data.as_mut_ptr()) };
+            }
+        }
 
         if result == 0 {
             Ok(())
